@@ -62,7 +62,7 @@ header .btn{padding:11px 16px;font-size:14px;white-space:nowrap}
 .beam.b2{filter:blur(60px);opacity:.55;width:80%}
 .beams-scroll,.beams{position:absolute;inset:0;pointer-events:none;will-change:transform,opacity}
 .beams-scroll{-webkit-mask-image:linear-gradient(#000 55%,transparent 92%);mask-image:linear-gradient(#000 55%,transparent 92%)}
-.beam{will-change:opacity}
+.beam{will-change:opacity,transform}
 .eyebrow{font-weight:600;font-size:14px;color:var(--muted);margin:0 0 22px;display:flex;align-items:center;gap:12px}
 .eyebrow::before{content:"";width:28px;height:2px;background:var(--yel)}
 h1{font-weight:800;font-size:clamp(36px,6.4vw,96px);line-height:.93;letter-spacing:-.045em;margin:0;text-wrap:balance}
@@ -792,7 +792,10 @@ footer nav a:hover{color:var(--ink)}
     .from('#hint',{opacity:0,y:10,duration:.6},1.8)
     .fromTo('.pnl .face',{'--sweep':'-120%'},{'--sweep':'160%',duration:1.8,stagger:.1,ease:'power2.inOut'},1.6)
     .from('#spark',{strokeDasharray:900,strokeDashoffset:900,duration:1.6,ease:'power2.inOut'},1.5);
-  gsap.to('.beam:not(.b2)',{opacity:.65,duration:3,yoyo:true,repeat:-1,ease:'sine.inOut'});
+  gsap.to('.beam:not(.b2)',{opacity:.5,duration:3,yoyo:true,repeat:-1,ease:'sine.inOut'});
+  // Deriva lenta del feix: només transformacions, que no obliguen a recalcular el difuminat
+  gsap.to('.beam:not(.b2)',{xPercent:9,rotation:2.5,duration:7,yoyo:true,repeat:-1,ease:'sine.inOut'});
+  gsap.to('.beam.b2',{xPercent:-6,rotation:-1.5,duration:9,yoyo:true,repeat:-1,ease:'sine.inOut',delay:1.5});
 
   // Flotació contínua de cada panell
   // Només flota quan la figura està quieta (abans o després del desplegament), mai mentre es desplega
