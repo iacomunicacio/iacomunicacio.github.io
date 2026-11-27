@@ -1,4 +1,7 @@
 {
+  "pagament": "transferencia",
+  "dies_per_pagar": 5,
+  "formulari_brevo": "",
   "preu_euros": 149,
   "places": 10,
   "web": "https://iacomunicacio.github.io",

@@ -12,8 +12,8 @@ Landing del curs presencial d'un dia (Barcelona, en català). És una web feta e
 | `.nojekyll` | Fa que GitHub Pages publiqui la web tal com és. |
 | `edicions.json` | Les dates de les edicions, el preu, les places i el lloc. Per afegir una edició, s'hi afegeix aquí. |
 | `places.json` | Les places lliures i l'enllaç de pagament de cada edició. L'escriu sola la tasca automàtica: no s'ha de tocar. |
-| `scripts/stripe_sync.py` | La tasca automàtica: crea els enllaços de pagament a Stripe, compta les places i passa les inscripcions a Brevo. |
-| `correus/` | La primera versió dels correus de benvinguda i de preparació. Un cop creats a Brevo, es canvien des de Brevo. |
+| `scripts/inscripcions.py` | La tasca automàtica: llegeix les reserves de Brevo (o els pagaments de Stripe), compta les places i envia els correus. |
+| `correus/` | La primera versió dels correus (transferència, benvinguda, preparació, caducada i edició completa). Un cop creats a Brevo, es canvien des de Brevo. |
 | `.github/workflows/places.yml` | Diu a GitHub que faci la tasca automàtica cada 15 minuts. |
 
 ## Com es publica
@@ -24,13 +24,26 @@ Landing del curs presencial d'un dia (Barcelona, en català). És una web feta e
 
 ## Com funcionen les inscripcions
 
-1. Cada edició té el seu enllaç de pagament de **Stripe**, amb un límit de 10 pagaments. Quan s'arriba a 10, Stripe el tanca.
-2. Stripe guarda les dades de cada persona inscrita (nom, correu, telèfon, empresa i dades de factura).
-3. Cada 15 minuts, GitHub executa `scripts/stripe_sync.py`, que:
-   - actualitza `places.json`, i la web mostra les places lliures o «Complet»;
-   - passa cada persona inscrita a **Brevo**, a la llista «Inscrits <data>» i a la llista «Butlletí»;
-   - li envia el correu de benvinguda i, una setmana abans, el correu de preparació (cada correu, un sol cop).
-4. Les claus són dos secrets del repositori (Settings → Secrets and variables → Actions): `STRIPE_KEY` i `BREVO_KEY`. Sense claus, la tasca no fa res.
+Cada 15 minuts, GitHub executa `scripts/inscripcions.py` (`.github/workflows/places.yml`). Què fa depèn de `pagament` a `edicions.json`.
+
+### Mode `transferencia` (curs pilot, ara actiu)
+
+1. «Reserva» obre un formulari a la web. Les dades van a la llista **Reserves** de Brevo (l'adreça del formulari és `formulari_brevo` a `edicions.json`).
+2. L'script envia el correu amb les dades de la transferència i el termini (`dies_per_pagar`). La plaça compta com a ocupada.
+3. Quan arriba la transferència, a Brevo s'obre el contacte i es marca **PAGAT**. L'script envia la benvinguda i afegeix la persona a «Inscrits <data>» i a «Butlletí».
+4. Si passa el termini sense pagar, la reserva caduca (correu d'avís) i la plaça queda lliure.
+5. Una setmana abans de l'edició, els que han pagat reben el correu de preparació.
+6. Si una edició ja és plena quan arriba una reserva, la persona rep el correu «Edició completa» i queda amb ESTAT `espera`.
+
+Els textos dels correus són plantilles de Brevo («Curs IA · …»). La primera versió és a `correus/`. El correu de transferència no s'envia mentre la plantilla tingui el text «[ESCRIU AQUÍ…]»: cal posar-hi el titular i l'IBAN des de Brevo.
+
+### Mode `stripe` (per a més endavant)
+
+Cada edició té un enllaç de pagament de Stripe amb un límit de 10 pagaments. L'script crea els enllaços, compta els pagaments i fa la mateixa feina amb Brevo (benvinguda, butlletí i preparació).
+
+### Claus
+
+Són secrets del repositori (Settings → Secrets and variables → Actions): `BREVO_KEY` i, per al mode Stripe, `STRIPE_KEY`. Sense claus, la tasca no fa res.
 
 ## Peces que es connectaran més endavant
 

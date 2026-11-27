@@ -1,18 +1,21 @@
-"""Sincronitza les inscripcions del curs: Stripe -> web (places) -> Brevo (correus).
+"""Inscripcions del curs: web -> Brevo (o Stripe) -> places i correus.
 
-Cada vegada que s'executa (GitHub ho fa cada 15 minuts):
-  1. Per a cada edició d'edicions.json, crea l'enllaç de pagament de Stripe si
-     encara no existeix (límit de pagaments = nombre de places).
-  2. Compta els pagaments completats i escriu places.json, que llegeix la web.
-  3. Si hi ha clau de Brevo, per a cada persona inscrita:
-       - l'afegeix a la llista «Inscrits <edició>» i a la llista «Butlletí»;
-       - li envia el correu de benvinguda (un sol cop);
-       - quan falten pocs dies per a l'edició, li envia el correu de preparació
-         (un sol cop).
-     Què s'ha enviat ja es recorda a Stripe (metadades del pagament), així no es
-     repeteix mai cap correu.
+GitHub l'executa cada 15 minuts. Hi ha dos modes, segons «pagament» a edicions.json:
 
-Les claus arriben per les variables d'entorn STRIPE_KEY i BREVO_KEY (secrets de
+transferencia (curs pilot)
+  La web envia la reserva a la llista «Reserves» de Brevo. Aquest script:
+    - envia a cada reserva nova el correu amb les instruccions de la transferència;
+    - quan marques PAGAT a Brevo, envia la benvinguda i l'afegeix a «Inscrits <data>»
+      i a «Butlletí»;
+    - si passa el termini sense pagar, la reserva caduca i la plaça torna a quedar lliure;
+    - una setmana abans, envia el correu de preparació als que han pagat;
+    - escriu places.json (places ocupades = pendents + pagades).
+
+stripe
+  Crea un enllaç de pagament per edició, compta els pagaments i fa el mateix amb
+  Brevo (llistes, benvinguda i preparació).
+
+Les claus arriben per les variables d'entorn BREVO_KEY i STRIPE_KEY (secrets de
 GitHub) i no s'escriuen mai en cap fitxer. Només fa servir la biblioteca
 estàndard de Python.
 """
@@ -29,10 +32,16 @@ ARREL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARCA = "curs-comunicacio-ia"
 CARPETA_BREVO = "Curs comunicació amb IA"
 LLISTA_BUTLLETI = "Butlletí"
+LLISTA_RESERVES = "Reserves"
 PLANTILLES = {
-    "benvinguda": ("Curs IA · Benvinguda", "Gràcies per inscriure't: {{ params.EDICIO }}"),
+    "benvinguda": ("Curs IA · Benvinguda", "Plaça confirmada: {{ params.EDICIO }}"),
     "preparacio": ("Curs IA · Preparació", "Falta una setmana: com preparar la jornada"),
+    "transferencia": ("Curs IA · Instruccions de pagament", "La teva reserva: com fer la transferència"),
+    "caducada": ("Curs IA · Reserva caducada", "La teva reserva ha caducat"),
+    "complet": ("Curs IA · Edició completa", "L'edició que has triat ja és plena"),
 }
+# Mentre la plantilla de transferència contingui aquest text, no s'envia (falta el número de compte).
+MARCA_IBAN = "[ESCRIU AQUÍ"
 
 
 # ---------------------------------------------------------------- utilitats
@@ -108,9 +117,12 @@ class Brevo:
 
     def atributs(self):
         tenim = {a["name"] for a in self("GET", "/contacts/attributes").get("attributes") or []}
-        for nom in ("NOM", "EMPRESA", "EDICIO", "TELEFON"):
+        tipus = {"NOM": "text", "EMPRESA": "text", "EDICIO": "text", "TELEFON": "text", "FACTURA": "text",
+                 "ESTAT": "text", "RESERVA_DATA": "date", "PAGAT": "boolean", "PREPARACIO": "boolean"}
+        for nom, t in tipus.items():
             if nom not in tenim:
-                self("POST", f"/contacts/attributes/normal/{nom}", {"type": "text"})
+                self("POST", f"/contacts/attributes/normal/{nom}", {"type": t})
+                print(f"Brevo: creat el camp {nom}.")
 
     def plantilles(self, arrel):
         """Crea les plantilles si no hi són. Si ja hi són, no les toca (les edites a Brevo)."""
@@ -122,7 +134,9 @@ class Brevo:
         if not remitents:
             sys.exit("Brevo: no hi ha cap remitent verificat. Cal verificar el teu correu a Brevo (Remitents).")
         rem = remitents[0]
-        ids = {}
+        ids, self.html = {}, {}
+        for t in r.get("templates") or []:
+            self.html[t["id"]] = t.get("htmlContent") or ""
         for clau, (nom, assumpte) in PLANTILLES.items():
             if nom not in existents:
                 with open(os.path.join(arrel, "correus", clau + ".html"), encoding="utf-8") as f:
@@ -132,9 +146,25 @@ class Brevo:
                     "sender": {"email": rem["email"], "name": rem.get("name") or rem["email"]},
                     "replyTo": rem["email"],
                 })["id"]
+                self.html[existents[nom]] = html
                 print(f"Brevo: creada la plantilla «{nom}».")
             ids[clau] = existents[nom]
         return ids
+
+    def contactes(self, llista):
+        offset = 0
+        while True:
+            r = self("GET", f"/contacts/lists/{llista}/contacts", {"limit": 500, "offset": offset})
+            yield from r.get("contacts") or []
+            offset += 500
+            if offset >= r.get("count", 0):
+                return
+
+    def actualitza(self, email, atributs, llistes=None):
+        cos = {"attributes": atributs}
+        if llistes:
+            cos["listIds"] = llistes
+        self("PUT", "/contacts/" + urllib.parse.quote(email), cos)
 
     def envia(self, plantilla, email, nom, params):
         self("POST", "/smtp/email", {"templateId": plantilla, "to": [{"email": email, "name": nom or email}],
@@ -185,19 +215,145 @@ def camp(sessio, clau):
 
 
 # ---------------------------------------------------------------- principal
+def escriu_places(sortida, mode, extra=None):
+    ruta = os.path.join(ARREL, "places.json")
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            abans = json.load(f)
+    except (OSError, ValueError):
+        abans = {}
+    nou = dict({"mode": mode, "edicions": sortida}, **(extra or {}))
+    if all(abans.get(k) == v for k, v in nou.items()):
+        print("Places sense canvis.")
+        return
+    nou["actualitzat"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(nou, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print("places.json actualitzat.")
+
+
+def preparar_brevo(brevo):
+    carpeta = brevo.carpeta()
+    llistes = brevo.llistes()
+    brevo.atributs()
+    return carpeta, llistes, brevo.plantilles(ARREL)
+
+
 def main():
+    with open(os.path.join(ARREL, "edicions.json"), encoding="utf-8") as f:
+        cfg = json.load(f)
+    clau_brevo = os.environ.get("BREVO_KEY", "").strip()
+    brevo = Brevo(clau_brevo) if clau_brevo else None
+    if cfg.get("pagament", "transferencia") == "stripe":
+        main_stripe(cfg, brevo)
+    else:
+        main_transferencia(cfg, brevo)
+
+
+# ---------------------------------------------------------------- transferència
+def main_transferencia(cfg, brevo):
+    """Reserves amb el formulari de la web (Brevo) i pagament per transferència.
+
+    Estats d'una reserva (camp ESTAT a Brevo):
+      nova      acaba d'arribar del formulari (l'script ho canvia a «rebuda» de seguida)
+      rebuda    reserva registrada; encara no s'han pogut enviar les instruccions
+      pendent   ha rebut les instruccions i encara no ha pagat (compta com a plaça ocupada)
+      pagat     en Jaume ha marcat la casella PAGAT a Brevo
+      caducada  ha passat el termini sense pagar (plaça alliberada)
+      espera    l'edició ja era plena quan va reservar
+    """
+    extra = {"formulari": cfg.get("formulari_brevo") or None}
+    if not brevo:
+        print("Encara no hi ha cap clau de Brevo (secret BREVO_KEY). Només s'actualitza places.json.")
+        escriu_places({}, "transferencia", extra)
+        return
+    avui = datetime.date.today()
+    dies_pagar = int(cfg.get("dies_per_pagar", 5))
+    carpeta, llistes, plantilles = preparar_brevo(brevo)
+    reserves = brevo.llista(LLISTA_RESERVES, llistes, carpeta)
+    butlleti = brevo.llista(LLISTA_BUTLLETI, llistes, carpeta)
+    iban_llest = MARCA_IBAN not in brevo.html.get(plantilles["transferencia"], MARCA_IBAN)
+    if not iban_llest:
+        print("AVÍS: la plantilla «Curs IA · Instruccions de pagament» encara no té el número de compte. "
+              "No s'envien instruccions fins que l'omplis a Brevo.")
+
+    edicions = {e["data"]: e for e in cfg["edicions"]}
+    ocupades = {d: 0 for d in edicions}
+    # Per ordre d'arribada, perquè l'última plaça sigui per a qui ha reservat abans.
+    for c in sorted(brevo.contactes(reserves), key=lambda c: c.get("createdAt") or ""):
+        email = c.get("email") or ""
+        at = c.get("attributes") or {}
+        ed = edicions.get(str(at.get("EDICIO") or "").strip()[:10])
+        if not email or not ed:
+            continue
+        data_ed = datetime.date.fromisoformat(ed["data"])
+        estat = (at.get("ESTAT") or "").strip().lower()
+        pagat = at.get("PAGAT") in (True, "true", "True", 1, "1", "yes", "Sí")
+        if estat == "nova":
+            # El formulari posa ESTAT=nova a cada reserva (també si la persona ja havia reservat abans).
+            estat, pagat = "rebuda", False
+            at["PREPARACIO"] = False
+            brevo.actualitza(email, {"ESTAT": "rebuda", "PAGAT": False, "PREPARACIO": False})
+        nom = (at.get("NOM") or "").strip()
+        params = {"NOM": nom.split(" ")[0] if nom else "", "EDICIO": ed["nom"], "LLOC": cfg.get("lloc", ""),
+                  "IMPORT": f"{cfg['preu_euros']} €", "CONCEPTE": f"CURS {ed['data']} {nom}".upper()[:60],
+                  "DIES": str(dies_pagar), "WEB": cfg["web"]}
+        canvis = {}
+
+        if pagat and estat != "pagat":
+            if avui <= data_ed:
+                brevo.envia(plantilles["benvinguda"], email, nom, params)
+            canvis["ESTAT"] = estat = "pagat"
+            brevo.actualitza(email, canvis, [brevo.llista(f"Inscrits {ed['data']}", llistes, carpeta), butlleti])
+            print(f"  {email}: pagament confirmat.")
+            canvis = {}
+        elif estat in ("", "rebuda"):
+            if ocupades[ed["data"]] >= cfg["places"] or avui > data_ed:
+                brevo.envia(plantilles["complet"], email, nom, params)
+                canvis["ESTAT"] = "espera"
+            elif iban_llest:
+                termini = min(avui + datetime.timedelta(days=dies_pagar), data_ed - datetime.timedelta(days=1))
+                params["TERMINI"] = termini.strftime("%d/%m/%Y")
+                brevo.envia(plantilles["transferencia"], email, nom, params)
+                canvis.update({"ESTAT": "pendent", "RESERVA_DATA": avui.isoformat()})
+                estat = "pendent"
+            else:
+                estat = "pendent"  # la plaça ja compta, però encara no s'han enviat les instruccions
+        elif estat == "pendent":
+            try:
+                reservat = datetime.date.fromisoformat(str(at.get("RESERVA_DATA") or "")[:10])
+            except ValueError:
+                reservat = avui
+            if avui > min(reservat + datetime.timedelta(days=dies_pagar), data_ed - datetime.timedelta(days=1)):
+                brevo.envia(plantilles["caducada"], email, nom, params)
+                canvis["ESTAT"] = estat = "caducada"
+
+        if estat == "pagat" and at.get("PREPARACIO") not in (True, "true") and \
+                data_ed - datetime.timedelta(days=cfg.get("dies_preparacio", 7)) <= avui <= data_ed:
+            brevo.envia(plantilles["preparacio"], email, nom, params)
+            canvis["PREPARACIO"] = True
+        if canvis:
+            brevo.actualitza(email, canvis)
+            print(f"  {email}: {canvis}")
+        if estat in ("pendent", "pagat"):
+            ocupades[ed["data"]] += 1
+
+    sortida = {d: {"inscrits": n, "places": cfg["places"], "obert": n < cfg["places"], "url": None}
+               for d, n in ocupades.items()}
+    for d, n in ocupades.items():
+        print(f"{edicions[d]['nom']}: {n} de {cfg['places']} places ocupades.")
+    escriu_places(sortida, "transferencia", extra)
+
+
+# ---------------------------------------------------------------- Stripe
+def main_stripe(cfg, brevo):
     clau = os.environ.get("STRIPE_KEY", "").strip()
     if not clau:
         print("Encara no hi ha cap clau de Stripe (secret STRIPE_KEY). No es fa res.")
         return
     mode = "proves" if clau.startswith(("sk_test_", "rk_test_")) else "real"
-    clau_brevo = os.environ.get("BREVO_KEY", "").strip()
-    brevo = Brevo(clau_brevo) if clau_brevo else None
     avui = datetime.date.today()
-
-    with open(os.path.join(ARREL, "edicions.json"), encoding="utf-8") as f:
-        cfg = json.load(f)
-
     existents = {}
     for pl in stripe_tots("/payment_links", {}, clau):
         md = pl.get("metadata") or {}
@@ -205,11 +361,8 @@ def main():
             existents.setdefault(md["edicio"], pl)  # Stripe llista primer el més recent
 
     if brevo:
-        carpeta = brevo.carpeta()
-        llistes = brevo.llistes()
+        carpeta, llistes, plantilles = preparar_brevo(brevo)
         butlleti = brevo.llista(LLISTA_BUTLLETI, llistes, carpeta)
-        brevo.atributs()
-        plantilles = brevo.plantilles(ARREL)
     else:
         print("Sense clau de Brevo (secret BREVO_KEY): no es passen contactes ni s'envien correus.")
 
@@ -264,23 +417,7 @@ def main():
                 stripe("POST", f"/payment_intents/{pi['id']}", {f"metadata[{k}]": v for k, v in nou.items()}, clau)
                 print(f"  {email}: {', '.join(nou)}")
 
-    ruta = os.path.join(ARREL, "places.json")
-    try:
-        with open(ruta, encoding="utf-8") as f:
-            abans = json.load(f)
-    except (OSError, ValueError):
-        abans = {}
-    if abans.get("edicions") == sortida and abans.get("mode") == mode:
-        print("Places sense canvis.")
-        return
-    with open(ruta, "w", encoding="utf-8") as f:
-        json.dump({
-            "actualitzat": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "mode": mode,
-            "edicions": sortida,
-        }, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    print("places.json actualitzat.")
+    escriu_places(sortida, mode)
 
 
 if __name__ == "__main__":

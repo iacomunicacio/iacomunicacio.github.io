@@ -24,7 +24,7 @@ jobs:
         env:
           STRIPE_KEY: ${{ secrets.STRIPE_KEY }}
           BREVO_KEY: ${{ secrets.BREVO_KEY }}
-        run: python scripts/stripe_sync.py
+        run: python scripts/inscripcions.py
       - name: Publica els canvis
         run: |
           if git diff --quiet -- places.json; then exit 0; fi
