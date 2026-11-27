@@ -639,7 +639,7 @@ footer nav a:hover{color:var(--ink)}
           <details><summary>On es fa i a quina hora?</summary><div class="a">A Barcelona, en dissabte: de 9 a 13 h i de 14 a 18 h, amb el dinar inclòs. L'espai exacte s'anunciarà aquí i t'arribarà per correu en fer la inscripció.</div></details>
           <details><summary>En quin idioma és el curs?</summary><div class="a">En català.</div></details>
           <details><summary>Ho podeu fer per a la nostra empresa?</summary><div class="a">Sí. Fem formacions a mida per a equips, a les vostres instal·lacions o en línia. <a href="#contacte" data-contact="empresa">Escriu-nos</a> i en parlem.</div></details>
-          <details><summary>Em podeu fer factura?</summary><div class="a">Sí. Marca l'opció de factura al formulari i escriu-hi les dades de l'empresa.</div></details>
+          <details><summary>Em podeu fer factura?</summary><div class="a">Sí. En el pas de pagament hi pots afegir el NIF i les dades de l'empresa, i reps la factura per correu.</div></details>
           <details><summary>Què passa si no puc venir?</summary><div class="a">Escriu-nos com més aviat millor. Pots cancel·lar d'acord amb la normativa vigent de consum, i també et podem proposar canviar a una altra edició.</div></details>
           <p class="more">Tens un altre dubte? <a href="#contacte" data-contact>Escriu-nos →</a></p>
         </div>
@@ -936,27 +936,42 @@ footer nav a:hover{color:var(--ink)}
   gsap.to('.book-float',{y:-8,duration:3,yoyo:true,repeat:-1,ease:'sine.inOut'});
   gsap.from('.manual .txt > *',{y:30,opacity:0,duration:.9,stagger:.08,ease:'power3.out',scrollTrigger:{trigger:'#manual',start:'top 70%'}});
   gsap.from('.faq details',{y:24,opacity:0,duration:.7,stagger:.06,ease:'power3.out',scrollTrigger:{trigger:'.faq',start:'top 85%'}});
-  /* ---------- Places per edició (el servidor les omplirà; màxim 10) ---------- */
+  /* ---------- Places i pagament (Stripe) ----------
+     places.json l'actualitza cada 15 minuts una tasca de GitHub (scripts/stripe_sync.py).
+     Cada edició té el seu enllaç de pagament, que Stripe tanca sol en arribar a 10 pagaments. */
   const PLACES_MAX=10;
-  const INSCRITS=window.INSCRITS||{'2027-01-30':0,'2027-03-27':0,'2027-05-29':0};
-  document.querySelectorAll('[data-seats]').forEach(el=>{
-    const ed=el.dataset.seats,lliures=Math.max(0,PLACES_MAX-(INSCRITS[ed]||0));
-    const row=el.closest('.date'),btn=row.querySelector('[data-ed]');
-    if(lliures===0){
-      el.textContent='Complet';el.classList.add('full');row.classList.add('full');
-      btn.textContent='Complet';btn.setAttribute('aria-disabled','true');btn.removeAttribute('href');btn.tabIndex=-1;
-    }else{
-      el.textContent=lliures===1?'Queda 1 plaça':(lliures<PLACES_MAX?'Queden '+lliures+' places':lliures+' places lliures');
+  const toast=document.getElementById('toast');let tt;
+  const say=(html,ms)=>{toast.innerHTML=html;toast.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>toast.classList.remove('show'),ms||4200)};
+  const pinta=dades=>{
+    document.querySelectorAll('[data-seats]').forEach(el=>{
+      const ed=el.dataset.seats,info=dades[ed]||{},max=info.places||PLACES_MAX;
+      const lliures=Math.max(0,max-(info.inscrits||0));
+      const row=el.closest('.date'),btn=row.querySelector('[data-ed]');
+      el.classList.remove('full','low');row.classList.remove('full');
+      if(lliures===0||info.obert===false){
+        el.textContent='Complet';el.classList.add('full');row.classList.add('full');
+        btn.textContent='Complet';btn.setAttribute('aria-disabled','true');btn.removeAttribute('href');btn.tabIndex=-1;
+        return;
+      }
+      el.textContent=lliures===1?'Queda 1 plaça':(lliures<max?'Queden '+lliures+' places':lliures+' places lliures');
       if(lliures<=3)el.classList.add('low');
-    }
-  });
+      if(info.url){btn.href=info.url;btn.dataset.pay='1'}
+    });
+  };
+  pinta(window.INSCRITS||{});
+  fetch('places.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(j=>{if(j&&j.edicions)pinta(j.edicions)}).catch(()=>{});
+  document.querySelectorAll('[data-ed]').forEach(b=>b.addEventListener('click',e=>{
+    if(b.getAttribute('aria-disabled')==='true'){e.preventDefault();return}
+    if(b.dataset.pay)return; // obre el pagament segur de Stripe
+    e.preventDefault();
+    say('<b>Les inscripcions s\'obriran molt aviat.</b> Si vols que t\'avisem, deixa\'ns el correu a l\'apartat del manual gratuït.');
+  }));
+  if(new URLSearchParams(location.search).get('inscripcio')==='ok'){
+    say('<b>Inscripció feta. Gràcies!</b> Rebràs el rebut per correu i, una setmana abans, t\'enviarem com preparar la jornada.',9000);
+    history.replaceState(null,'',location.pathname+location.hash);
+  }
 
   /* ---------- Formularis (prototip: no s'envia res) ---------- */
-  // A la versió final: cada botó obre Stripe Checkout per a la seva edició (amb camps de factura).
-  const toast=document.getElementById('toast');let tt;
-  const say=html=>{toast.innerHTML=html;toast.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>toast.classList.remove('show'),4200)};
-  document.querySelectorAll('[data-ed]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();if(b.getAttribute('aria-disabled')==='true')return;
-    say('<b>Pagament segur amb Stripe.</b> A la versió final, aquí s\'obre el pagament per al '+b.closest('.date').querySelector('.dd').firstChild.textContent.trim().toLowerCase()+'. En aquest prototip no es fa cap cobrament.')}));
   function handle(id,doneId,okMsg){
     const f=document.getElementById(id),d=document.getElementById(doneId);
     f.addEventListener('submit',e=>{

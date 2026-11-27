@@ -1,0 +1,35 @@
+name: Places i pagaments (Stripe)
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: places
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Llegeix Stripe, actualitza les places i passa les inscripcions a Brevo
+        env:
+          STRIPE_KEY: ${{ secrets.STRIPE_KEY }}
+          BREVO_KEY: ${{ secrets.BREVO_KEY }}
+        run: python scripts/stripe_sync.py
+      - name: Publica els canvis
+        run: |
+          if git diff --quiet -- places.json; then exit 0; fi
+          git config user.name "places-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add places.json
+          git commit -m "Actualitza les places de les edicions"
+          git push
