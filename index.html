@@ -84,7 +84,7 @@ h1{font-weight:800;font-size:clamp(36px,6.4vw,96px);line-height:.93;letter-spaci
 .scene{position:relative;width:100%;aspect-ratio:16/9.5;transform:rotateX(24deg) rotateY(-16deg)}
 .pnl{position:absolute;transform-style:preserve-3d}
 .pnl .face{position:absolute;inset:0;background:linear-gradient(160deg,var(--panel-2),var(--panel));border:1px solid rgba(255,255,255,.18);overflow:hidden;
-  box-shadow:0 30px 60px -20px rgba(0,0,0,.7), 0 0 0 1px rgba(88,104,255,.12)}
+  box-shadow:0 0 0 1px rgba(88,104,255,.12)}
 .pnl .face::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.13) 47%,transparent 60%);transform:translateX(var(--sweep,-120%))}
 .pnl .edge{position:absolute;inset:0;border:1px solid rgba(140,151,255,.25);transform:translateZ(-10px);background:rgba(43,55,184,.25)}
 .pnl .edge.e2{transform:translateZ(-20px);background:rgba(43,55,184,.12);border-color:rgba(140,151,255,.12)}
@@ -795,7 +795,14 @@ footer nav a:hover{color:var(--ink)}
   gsap.to('.beam:not(.b2)',{opacity:.65,duration:3,yoyo:true,repeat:-1,ease:'sine.inOut'});
 
   // Flotació contínua de cada panell
-  gsap.to('.stage',{y:-10,duration:3.2,yoyo:true,repeat:-1,ease:'sine.inOut'});
+  // Només flota quan la figura està quieta (abans o després del desplegament), mai mentre es desplega
+  const floatTw=gsap.fromTo('.stage',{y:0},{y:-10,duration:3.2,yoyo:true,repeat:-1,ease:'sine.inOut',paused:true});
+  let floating=false;
+  const setFloat=on=>{
+    if(on===floating)return;floating=on;
+    if(on){floatTw.timeScale(0).play();gsap.to(floatTw,{timeScale:1,duration:.8,ease:'power1.in',overwrite:true})}
+    else{gsap.killTweensOf(floatTw);floatTw.pause();gsap.to('.stage',{y:0,duration:.35,ease:'power2.out'})}
+  };
   gsap.to('#hint i',{scaleY:.3,transformOrigin:'50% 0',duration:.9,yoyo:true,repeat:-1,ease:'sine.inOut'});
   // Petits moviments interns: vídeo, GIF, infografia
   gsap.to('#prog',{width:'100%',duration:5,repeat:-1,ease:'none'});
@@ -816,6 +823,8 @@ footer nav a:hover{color:var(--ink)}
     fan.fromTo(p,{x:()=>core.offsetLeft+core.offsetWidth/2-(p.offsetLeft+p.offsetWidth/2),y:()=>core.offsetTop+core.offsetHeight/2-(p.offsetTop+p.offsetHeight/2),z:()=>40+i*14,rotateZ:()=>(i-2.5)*3,scale:.55},
       {x:0,y:0,z:()=>+p.dataset.z*zf()+(narrow()?8:30),rotateZ:0,scale:1,ease:'power2.out',duration:1},i*.06);
   });
+  fan.eventCallback('onUpdate',()=>{const q=fan.progress();setFloat(q<=0.001||q>=0.999)});
+  setFloat(true);
   fan.to(core,{z:()=>narrow()?220:480,opacity:0,scale:.6,ease:'power2.in',duration:.7},.15)
      .to('#hint',{opacity:0,duration:.2},0);
   gsap.fromTo('.beams-scroll',{yPercent:0,opacity:1},{yPercent:-12,opacity:.35,ease:'none',immediateRender:false,scrollTrigger:{trigger:'.hero',start:'top top',end:'bottom top',scrub:.6}});
