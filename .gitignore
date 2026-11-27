@@ -1,0 +1,14 @@
+# Claus i configuració privada
+.env
+.env.*
+# Fitxers de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+# Carpetes de l'allotjament i dependències
+.netlify/
+.vercel/
+node_modules/
+# Vídeos i fotos grans (van a YouTube/Vimeo i Cloudinary)
+*.mp4
+*.mov
