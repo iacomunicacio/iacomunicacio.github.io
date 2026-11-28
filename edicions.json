@@ -1,6 +1,6 @@
 {
   "pagament": "transferencia",
-  "dies_per_pagar": 5,
+  "hores_per_pagar": 48,
   "formulari_brevo": "",
   "preu_euros": 149,
   "places": 10,

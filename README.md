@@ -29,7 +29,7 @@ Cada 15 minuts, GitHub executa `scripts/inscripcions.py` (`.github/workflows/pla
 ### Mode `transferencia` (curs pilot, ara actiu)
 
 1. «Reserva» obre un formulari a la web. Les dades van a la llista **Reserves** de Brevo (l'adreça del formulari és `formulari_brevo` a `edicions.json`).
-2. L'script envia el correu amb les dades de la transferència i el termini (`dies_per_pagar`). La plaça compta com a ocupada.
+2. L'script envia el correu amb les dades de la transferència i el termini (`hores_per_pagar`, ara 48 h). La plaça compta com a ocupada.
 3. Quan arriba la transferència, a Brevo s'obre el contacte i es marca **PAGAT**. L'script envia la benvinguda i afegeix la persona a «Inscrits <data>» i a «Butlletí».
 4. Si passa el termini sense pagar, la reserva caduca (correu d'avís) i la plaça queda lliure.
 5. Una setmana abans de l'edició, els que han pagat reben el correu de preparació.

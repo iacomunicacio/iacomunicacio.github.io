@@ -118,7 +118,7 @@ class Brevo:
     def atributs(self):
         tenim = {a["name"] for a in self("GET", "/contacts/attributes").get("attributes") or []}
         tipus = {"NOM": "text", "EMPRESA": "text", "EDICIO": "text", "TELEFON": "text", "FACTURA": "text",
-                 "ESTAT": "text", "RESERVA_DATA": "date", "PAGAT": "boolean", "PREPARACIO": "boolean"}
+                 "ESTAT": "text", "RESERVA_HORA": "text", "PAGAT": "boolean", "PREPARACIO": "boolean"}
         for nom, t in tipus.items():
             if nom not in tenim:
                 self("POST", f"/contacts/attributes/normal/{nom}", {"type": t})
@@ -269,7 +269,13 @@ def main_transferencia(cfg, brevo):
         escriu_places({}, "transferencia", extra)
         return
     avui = datetime.date.today()
-    dies_pagar = int(cfg.get("dies_per_pagar", 5))
+    hores_pagar = int(cfg.get("hores_per_pagar", 48))
+    ara = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        local = ZoneInfo("Europe/Madrid")
+    except Exception:  # sense dades de zona horària: hora UTC + 1
+        local = datetime.timezone(datetime.timedelta(hours=1))
     carpeta, llistes, plantilles = preparar_brevo(brevo)
     reserves = brevo.llista(LLISTA_RESERVES, llistes, carpeta)
     butlleti = brevo.llista(LLISTA_BUTLLETI, llistes, carpeta)
@@ -288,6 +294,8 @@ def main_transferencia(cfg, brevo):
         if not email or not ed:
             continue
         data_ed = datetime.date.fromisoformat(ed["data"])
+        # El pagament ha d'arribar com a molt el dia abans de l'edició.
+        limit_ed = datetime.datetime.combine(data_ed, datetime.time(0, 0), tzinfo=datetime.timezone.utc)
         estat = (at.get("ESTAT") or "").strip().lower()
         pagat = at.get("PAGAT") in (True, "true", "True", 1, "1", "yes", "Sí")
         if estat == "nova":
@@ -298,7 +306,7 @@ def main_transferencia(cfg, brevo):
         nom = (at.get("NOM") or "").strip()
         params = {"NOM": nom.split(" ")[0] if nom else "", "EDICIO": ed["nom"], "LLOC": cfg.get("lloc", ""),
                   "IMPORT": f"{cfg['preu_euros']} €", "CONCEPTE": f"CURS {ed['data']} {nom}".upper()[:60],
-                  "DIES": str(dies_pagar), "WEB": cfg["web"]}
+                  "HORES": str(hores_pagar), "WEB": cfg["web"]}
         canvis = {}
 
         if pagat and estat != "pagat":
@@ -313,19 +321,21 @@ def main_transferencia(cfg, brevo):
                 brevo.envia(plantilles["complet"], email, nom, params)
                 canvis["ESTAT"] = "espera"
             elif iban_llest:
-                termini = min(avui + datetime.timedelta(days=dies_pagar), data_ed - datetime.timedelta(days=1))
-                params["TERMINI"] = termini.strftime("%d/%m/%Y")
+                termini = min(ara + datetime.timedelta(hours=hores_pagar), limit_ed)
+                params["TERMINI"] = termini.astimezone(local).strftime("%d/%m/%Y a les %H:%M h")
                 brevo.envia(plantilles["transferencia"], email, nom, params)
-                canvis.update({"ESTAT": "pendent", "RESERVA_DATA": avui.isoformat()})
+                canvis.update({"ESTAT": "pendent", "RESERVA_HORA": ara.strftime("%Y-%m-%dT%H:%M:%SZ")})
                 estat = "pendent"
             else:
                 estat = "pendent"  # la plaça ja compta, però encara no s'han enviat les instruccions
         elif estat == "pendent":
             try:
-                reservat = datetime.date.fromisoformat(str(at.get("RESERVA_DATA") or "")[:10])
+                reservat = datetime.datetime.strptime(str(at.get("RESERVA_HORA") or ""), "%Y-%m-%dT%H:%M:%SZ") \
+                    .replace(tzinfo=datetime.timezone.utc)
             except ValueError:
-                reservat = avui
-            if avui > min(reservat + datetime.timedelta(days=dies_pagar), data_ed - datetime.timedelta(days=1)):
+                reservat = ara
+                canvis["RESERVA_HORA"] = ara.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if ara > min(reservat + datetime.timedelta(hours=hores_pagar), limit_ed):
                 brevo.envia(plantilles["caducada"], email, nom, params)
                 canvis["ESTAT"] = estat = "caducada"
 
