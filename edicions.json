@@ -1,0 +1,24 @@
+{
+  "pagament": "transferencia",
+  "hores_per_pagar": 48,
+  "formulari_brevo": "",
+  "preu_euros": 149,
+  "places": 10,
+  "web": "https://iacomunicacio.github.io",
+  "edicions": [
+    {
+      "data": "2027-01-30",
+      "nom": "Dissabte 30 de gener de 2027"
+    },
+    {
+      "data": "2027-03-27",
+      "nom": "Dissabte 27 de març de 2027"
+    },
+    {
+      "data": "2027-05-29",
+      "nom": "Dissabte 29 de maig de 2027"
+    }
+  ],
+  "lloc": "Barcelona (t'enviarem l'adreça exacta abans de la jornada)",
+  "dies_preparacio": 7
+}

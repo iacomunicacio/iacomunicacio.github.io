@@ -599,7 +599,7 @@ footer nav a:hover{color:var(--ink)}
           <div class="date"><span class="mo">Març 2027</span><div class="dd">Dissabte 27 de març<span>De 9 a 13 h i de 14 a 18 h · Dinar inclòs</span><em class="seats" data-seats="2027-03-27"></em></div><a class="btn btn-o" href="#" data-ed="2027-03-27">Reserva</a></div>
           <div class="date"><span class="mo">Maig 2027</span><div class="dd">Dissabte 29 de maig<span>De 9 a 13 h i de 14 a 18 h · Dinar inclòs</span><em class="seats" data-seats="2027-05-29"></em></div><a class="btn btn-o" href="#" data-ed="2027-05-29">Reserva</a></div>
           <p class="note">A Barcelona; l'espai exacte s'anunciarà aviat. Curs impartit en català. Quan una edició arriba a 10 inscripcions, es tanca automàticament.</p>
-          <p class="note pay">En reservar passes directament al pagament segur amb targeta, Apple Pay o Google Pay. Si necessites factura d'empresa, la pots demanar en el mateix pas.</p>
+          <p class="note pay" id="nota-pagament">En reservar reps per correu les indicacions per pagar per transferència. La plaça queda confirmada quan rebem el pagament. Si necessites factura d'empresa, indica-ho en reservar.</p>
         </div>
       </div>
     </div>
@@ -639,7 +639,7 @@ footer nav a:hover{color:var(--ink)}
           <details><summary>On es fa i a quina hora?</summary><div class="a">A Barcelona, en dissabte: de 9 a 13 h i de 14 a 18 h, amb el dinar inclòs. L'espai exacte s'anunciarà aquí i t'arribarà per correu en fer la inscripció.</div></details>
           <details><summary>En quin idioma és el curs?</summary><div class="a">En català.</div></details>
           <details><summary>Ho podeu fer per a la nostra empresa?</summary><div class="a">Sí. Fem formacions a mida per a equips, a les vostres instal·lacions o en línia. <a href="#contacte" data-contact="empresa">Escriu-nos</a> i en parlem.</div></details>
-          <details><summary>Em podeu fer factura?</summary><div class="a">Sí. Marca l'opció de factura al formulari i escriu-hi les dades de l'empresa.</div></details>
+          <details><summary>Em podeu fer factura?</summary><div class="a">Sí. Marca-ho en reservar i et demanarem les dades de l'empresa per correu.</div></details>
           <details><summary>Què passa si no puc venir?</summary><div class="a">Escriu-nos com més aviat millor. Pots cancel·lar d'acord amb la normativa vigent de consum, i també et podem proposar canviar a una altra edició.</div></details>
           <p class="more">Tens un altre dubte? <a href="#contacte" data-contact>Escriu-nos →</a></p>
         </div>
@@ -668,6 +668,21 @@ footer nav a:hover{color:var(--ink)}
     <label class="chk"><input type="checkbox" id="c-priv" required>Accepto la <a href="#legal">política de privacitat</a>.</label>
     <div><button class="btn btn-y" type="submit">Envia el missatge</button></div>
     <div class="done" id="d-contact" role="status"></div>
+  </form>
+</dialog>
+<dialog class="modal" id="reserva" aria-labelledby="rs-t">
+  <div class="hd"><div><h3 id="rs-t">Reserva la plaça</h3><p id="rs-ed"></p></div><button class="x" type="button" aria-label="Tanca" data-close>×</button></div>
+  <form class="form" id="f-reserva" novalidate>
+    <input type="hidden" name="EDICIO" id="r-ed"><input type="hidden" name="ESTAT" value="nova">
+    <div class="fld"><label for="r-nom">Nom i cognoms</label><input id="r-nom" name="NOM" autocomplete="name" required></div>
+    <div class="fld"><label for="r-mail">Correu electrònic</label><input id="r-mail" name="EMAIL" type="email" autocomplete="email" required></div>
+    <div class="fld"><label for="r-tel">Telèfon</label><input id="r-tel" name="TELEFON" type="tel" autocomplete="tel" required></div>
+    <div class="fld"><label for="r-org">Empresa o organització (opcional)</label><input id="r-org" name="EMPRESA" autocomplete="organization"></div>
+    <label class="chk"><input type="checkbox" name="FACTURA" value="Sí" id="r-fac"><span>Necessito factura d'empresa (et demanarem les dades per correu).</span></label>
+    <label class="chk"><input type="checkbox" id="r-priv" required><span>Accepto la <a href="#legal">política de privacitat</a> i rebre els correus del curs i el butlletí, dels quals em puc donar de baixa quan vulgui.</span></label>
+    <input type="text" name="email_address_check" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px">
+    <div><button class="btn btn-y" type="submit">Reserva la plaça</button></div>
+    <div class="done" id="d-reserva" role="status"></div>
   </form>
 </dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -936,27 +951,44 @@ footer nav a:hover{color:var(--ink)}
   gsap.to('.book-float',{y:-8,duration:3,yoyo:true,repeat:-1,ease:'sine.inOut'});
   gsap.from('.manual .txt > *',{y:30,opacity:0,duration:.9,stagger:.08,ease:'power3.out',scrollTrigger:{trigger:'#manual',start:'top 70%'}});
   gsap.from('.faq details',{y:24,opacity:0,duration:.7,stagger:.06,ease:'power3.out',scrollTrigger:{trigger:'.faq',start:'top 85%'}});
-  /* ---------- Places per edició (el servidor les omplirà; màxim 10) ---------- */
+  /* ---------- Places i pagament (Stripe) ----------
+     places.json l'actualitza cada 15 minuts una tasca de GitHub (scripts/inscripcions.py).
+     Cada edició té el seu enllaç de pagament, que Stripe tanca sol en arribar a 10 pagaments. */
   const PLACES_MAX=10;
-  const INSCRITS=window.INSCRITS||{'2027-01-30':0,'2027-03-27':0,'2027-05-29':0};
-  document.querySelectorAll('[data-seats]').forEach(el=>{
-    const ed=el.dataset.seats,lliures=Math.max(0,PLACES_MAX-(INSCRITS[ed]||0));
-    const row=el.closest('.date'),btn=row.querySelector('[data-ed]');
-    if(lliures===0){
-      el.textContent='Complet';el.classList.add('full');row.classList.add('full');
-      btn.textContent='Complet';btn.setAttribute('aria-disabled','true');btn.removeAttribute('href');btn.tabIndex=-1;
-    }else{
-      el.textContent=lliures===1?'Queda 1 plaça':(lliures<PLACES_MAX?'Queden '+lliures+' places':lliures+' places lliures');
+  const toast=document.getElementById('toast');let tt;
+  const say=(html,ms)=>{toast.innerHTML=html;toast.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>toast.classList.remove('show'),ms||4200)};
+  const pinta=dades=>{
+    document.querySelectorAll('[data-seats]').forEach(el=>{
+      const ed=el.dataset.seats,info=dades[ed]||{},max=info.places||PLACES_MAX;
+      const lliures=Math.max(0,max-(info.inscrits||0));
+      const row=el.closest('.date'),btn=row.querySelector('[data-ed]');
+      el.classList.remove('full','low');row.classList.remove('full');
+      if(lliures===0||info.obert===false){
+        el.textContent='Complet';el.classList.add('full');row.classList.add('full');
+        btn.textContent='Complet';btn.setAttribute('aria-disabled','true');btn.removeAttribute('href');btn.tabIndex=-1;
+        return;
+      }
+      el.textContent=lliures===1?'Queda 1 plaça':(lliures<max?'Queden '+lliures+' places':lliures+' places lliures');
       if(lliures<=3)el.classList.add('low');
-    }
-  });
+      if(info.url){btn.href=info.url;btn.dataset.pay='1'}
+    });
+  };
+  let FORM_RESERVA=null;
+  pinta(window.INSCRITS||{});
+  fetch('places.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(j=>{if(!j)return;if(j.formulari)FORM_RESERVA=j.formulari;if(j.edicions)pinta(j.edicions)}).catch(()=>{});
+  document.querySelectorAll('[data-ed]').forEach(b=>b.addEventListener('click',e=>{
+    if(b.getAttribute('aria-disabled')==='true'){e.preventDefault();return}
+    if(b.dataset.pay)return; // obre el pagament segur de Stripe
+    e.preventDefault();
+    if(FORM_RESERVA)return obreReserva(b);
+    say('<b>Les inscripcions s\'obriran molt aviat.</b> Si vols que t\'avisem, deixa\'ns el correu a l\'apartat del manual gratuït.');
+  }));
+  if(new URLSearchParams(location.search).get('inscripcio')==='ok'){
+    say('<b>Inscripció feta. Gràcies!</b> Rebràs el rebut per correu i, una setmana abans, t\'enviarem com preparar la jornada.',9000);
+    history.replaceState(null,'',location.pathname+location.hash);
+  }
 
   /* ---------- Formularis (prototip: no s'envia res) ---------- */
-  // A la versió final: cada botó obre Stripe Checkout per a la seva edició (amb camps de factura).
-  const toast=document.getElementById('toast');let tt;
-  const say=html=>{toast.innerHTML=html;toast.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>toast.classList.remove('show'),4200)};
-  document.querySelectorAll('[data-ed]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();if(b.getAttribute('aria-disabled')==='true')return;
-    say('<b>Pagament segur amb Stripe.</b> A la versió final, aquí s\'obre el pagament per al '+b.closest('.date').querySelector('.dd').firstChild.textContent.trim().toLowerCase()+'. En aquest prototip no es fa cap cobrament.')}));
   function handle(id,doneId,okMsg){
     const f=document.getElementById(id),d=document.getElementById(doneId);
     f.addEventListener('submit',e=>{
@@ -981,6 +1013,29 @@ footer nav a:hover{color:var(--ink)}
   dlg.addEventListener('close',()=>{if(lenis)lenis.start()});
   dlg.querySelector('[data-close]').addEventListener('click',()=>dlg.close());
   dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
+
+  /* ---------- Reserva amb transferència (el formulari envia les dades a Brevo) ---------- */
+  const rdlg=document.getElementById('reserva'),rf=document.getElementById('f-reserva'),rd=document.getElementById('d-reserva');
+  function obreReserva(b){
+    document.getElementById('r-ed').value=b.dataset.ed;
+    document.getElementById('rs-ed').textContent=b.closest('.date').querySelector('.dd').firstChild.textContent.trim()+' · 149 €';
+    rd.classList.remove('show');rf.querySelector('[type=submit]').disabled=false;
+    if(lenis)lenis.stop();rdlg.showModal();gsap.fromTo(rdlg,{y:24,opacity:0},{y:0,opacity:1,duration:.4,ease:'power3.out'});
+  }
+  rdlg.addEventListener('close',()=>{if(lenis)lenis.start()});
+  rdlg.querySelector('[data-close]').addEventListener('click',()=>rdlg.close());
+  rdlg.addEventListener('click',e=>{if(e.target===rdlg)rdlg.close()});
+  rf.addEventListener('submit',e=>{
+    e.preventDefault();
+    const bad=[...rf.querySelectorAll('[required]')].find(x=>x.type==='checkbox'?!x.checked:!x.value.trim()||(x.type==='email'&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.value)));
+    if(bad){rd.innerHTML='<b>Falta un camp.</b> Revisa: '+(bad.type==='checkbox'?'cal acceptar la política de privacitat':(rf.querySelector('label[for="'+bad.id+'"]')||{}).textContent||'el camp marcat')+'.';rd.classList.add('show');bad.focus();return}
+    const btn=rf.querySelector('[type=submit]');btn.disabled=true;
+    const fd=new FormData(rf);fd.set('EMAIL',fd.get('EMAIL').trim().toLowerCase());if(!fd.get('FACTURA'))fd.set('FACTURA','No');fd.append('locale','ca');
+    fetch(FORM_RESERVA,{method:'POST',mode:'no-cors',body:fd}).then(()=>{
+      rd.innerHTML='<b>Plaça reservada.</b> En pocs minuts rebràs un correu amb les indicacions per fer la transferència. Si no el veus, mira la carpeta de correu brossa.';
+      rd.classList.add('show');gsap.from(rd,{y:10,opacity:0,duration:.5});
+    }).catch(()=>{btn.disabled=false;rd.innerHTML='<b>No s\'ha pogut enviar.</b> Torna-ho a provar d\'aquí a una estona o escriu-nos des de Contacte.';rd.classList.add('show')});
+  });
 
   document.querySelectorAll('a[href^="#"]:not([data-contact]):not([data-ed])').forEach(a=>a.addEventListener('click',e=>{
     const t=document.querySelector(a.getAttribute('href'));if(!t)return;e.preventDefault();
